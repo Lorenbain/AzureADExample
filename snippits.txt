@@ -1,0 +1,112 @@
+//http://bit.do/azurefriday
+// auth startup
+ Notifications = new OpenIdConnectAuthenticationNotifications()
+                    {
+                        AuthenticationFailed = (context) =>
+                        {
+                            return System.Threading.Tasks.Task.FromResult(0);
+                        },
+                        RedirectToIdentityProvider = notification =>
+                        {
+                            notification.ProtocolMessage.DomainHint = "nait.ca";
+                            return System.Threading.Tasks.Task.FromResult(0);
+                        },
+                        SecurityTokenValidated = (context) =>
+                        {
+                            var groups = context.AuthenticationTicket.Identity.Claims.Where(x => x.Type.Equals("groups")).Select(x=>x.Value).ToList();
+
+                            var roles = from s in ConfigurationManager.AppSettings.OfType<string>()
+                                        where s.StartsWith("Role:") && groups.Contains(ConfigurationManager.AppSettings[s])
+                                        select s.Substring(5);
+
+                            foreach (string role in roles)
+                            {
+                                context.AuthenticationTicket.Identity.AddClaim(new Claim(context.AuthenticationTicket.Identity.RoleClaimType, role));
+                            }
+                        
+                            return Task.FromResult(0);
+                        },
+                       AuthorizationCodeReceived = (context) => 
+                       {
+                           var code = context.Code;
+                           ClientCredential credential = new ClientCredential(clientId, appKey);
+                           string signedInUserID = context.AuthenticationTicket.Identity.FindFirst(ClaimTypes.NameIdentifier).Value;
+                           AuthenticationContext authContext = new AuthenticationContext(Authority, new ADALTokenCache(signedInUserID));
+                           AuthenticationResult result = authContext.AcquireTokenByAuthorizationCode(
+                           code, new Uri(HttpContext.Current.Request.Url.GetLeftPart(UriPartial.Path)), credential, graphResourceId);
+
+                           return Task.FromResult(0);
+                       }
+
+
+
+
+// Controller methods	
+	public async Task<ActionResult> Index()
+        {
+            var Manager = await GetManagerName();
+            var Users = await GetUsers("John");
+            ViewBag.Users = Users.Select(x => x.DisplayName).ToList();
+            ViewBag.Manager = Manager.DisplayName;
+
+            return View();
+        }
+
+        public async Task<Microsoft.Graph.User> GetManagerName()
+        {
+            GraphServiceClient graphService = new GraphServiceClient(new AzureAuthenticationProvider());
+            Microsoft.Graph.User manager = (Microsoft.Graph.User)await graphService.Users[User.Identity.Name].Manager.Request().GetAsync();
+            return manager;
+
+        }
+
+        public async Task<Microsoft.Graph.IGraphServiceUsersCollectionPage> GetUsers(string search)
+        {
+            GraphServiceClient graphService = new GraphServiceClient(new AzureAuthenticationProvider());
+            var users = await graphService.Users.Request().Filter(String.Format("startswith(displayName,'{0}')",search)).GetAsync();
+            return users;
+
+        }
+
+
+// Authentication Provider
+
+using Microsoft.IdentityModel.Clients.ActiveDirectory;
+
+using Microsoft.Owin.Security;
+using Microsoft.Owin.Security.OpenIdConnect;
+using System.Collections.Generic;
+using System.Configuration;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using System.Web;
+using Microsoft.Graph;
+using System.Net.Http;
+using System;
+using TestMicrosoftGraphAPI.Models;
+
+namespace TestMicrosoftGraphAPI
+{
+    public static class AuthConfig
+    {
+        public static string clientId = ConfigurationManager.AppSettings["ida:ClientId"];
+        public static string appKey = ConfigurationManager.AppSettings["ida:ClientSecret"];
+        public static string aadInstance = ConfigurationManager.AppSettings["ida:AADInstance"];
+        public static string tenantId = ConfigurationManager.AppSettings["ida:TenantId"];
+        public static string postLogoutRedirectUri = ConfigurationManager.AppSettings["ida:PostLogoutRedirectUri"];
+    }
+
+    class AzureAuthenticationProvider : IAuthenticationProvider
+    {
+         public async Task AuthenticateRequestAsync(HttpRequestMessage request)
+        {
+            AuthenticationContext authContext = new AuthenticationContext("https://login.windows.net/" + AuthConfig.tenantId + "/auth2/token");
+            ClientCredential creds = new ClientCredential(AuthConfig.clientId, AuthConfig.appKey);
+            AuthenticationResult authResult = await authContext.AcquireTokenAsync("https://graph.microsoft.com/", creds);
+
+            request.Headers.Add("Authorization", "Bearer " + authResult.AccessToken);
+        }
+    }
+
+}
