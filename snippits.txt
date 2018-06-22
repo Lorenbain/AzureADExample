@@ -9,6 +9,7 @@
                         RedirectToIdentityProvider = notification =>
                         {
                             notification.ProtocolMessage.DomainHint = "nait.ca";
+			    notification.ProtocolMessage.RedirectUri = notification.OwinContext.Request.Uri.GetLeftPart(UriPartial.Authority) + notification.OwinContext.Request.PathBase.Value; ;
                             return System.Threading.Tasks.Task.FromResult(0);
                         },
                         SecurityTokenValidated = (context) =>
