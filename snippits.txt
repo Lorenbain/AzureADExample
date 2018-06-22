@@ -41,7 +41,19 @@
 
 
 
-
+// global.asax prevent authentication looping for unauthorized user
+public void Application_EndRequest(object sender, EventArgs e)
+        {
+           if (Context.Response.StatusCode == 302 && Context.User.Identity.IsAuthenticated &&
+               Context.Response.Headers["Location"].ToLower().StartsWith(System.Configuration.ConfigurationManager.AppSettings["ida:AADInstance"]) &&
+               !Context.Response.Headers["Location"].ToLower().Contains("/oauth2/logout"))
+            {
+                Response.Clear();
+                Server.Transfer("~/AccessDenied.aspx");
+            }
+ 
+        }
+	
 // Controller methods	
 	public async Task<ActionResult> Index()
         {
